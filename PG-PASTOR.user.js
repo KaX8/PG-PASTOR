@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PG-PASTOR
 // @namespace    PG-PASTOR
-// @version      0.11
+// @version      0.12
 // @description  Local paste library and compact keyword suggestions for Playgama Comment.
 // @match        https://playgama.youtrack.cloud/*
 // @run-at       document-idle
