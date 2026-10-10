@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PG-PASTOR
 // @namespace    PG-PASTOR
-// @version      0.12
+// @version      0.13
 // @description  Local paste library and compact keyword suggestions for Playgama Comment.
 // @match        https://playgama.youtrack.cloud/*
 // @run-at       document-idle
@@ -20,8 +20,8 @@
   const DB_KEY = 'pgPasteHelperDB_v1';
   const ENABLED_KEY = 'pgPasteHelperSuggestions_v1';
   const EDITOR_SELECTOR = [
-  '[data-test="editor field-Playgama Comment"] [data-test="wysiwyg-editor-content"][contenteditable="true"]',
-  '[data-test="editor field-Notes"] [data-test="wysiwyg-editor-content"][contenteditable="true"]'
+    '[data-test="editor field-Playgama Comment"] [data-test="wysiwyg-editor-content"][contenteditable="true"]',
+    '[data-test="editor field-Notes"] [data-test="wysiwyg-editor-content"][contenteditable="true"]'
   ].join(', ');
   const TITLE_LIMIT = 20;
   const MAX_KEYWORD_LENGTH = 320;
@@ -110,7 +110,7 @@
         order,
         keyword: normalize(keyword)
       }))
-    );
+      );
   }
 
   function findMatches(raw, index) {
@@ -522,808 +522,809 @@
     }
 
     let block = caret.endContainer.nodeType === Node.ELEMENT_NODE
-      ? caret.endContainer
-      : caret.endContainer.parentElement;
+    ? caret.endContainer
+    : caret.endContainer.parentElement;
 
     while (
       block &&
       block !== editor &&
       !block.matches('p,pre,h1,h2,h3,h4,h5,h6,li,td,th')
-    ) {
+      ) {
       block = block.parentElement;
-    }
+  }
 
-    if (!block) return null;
+  if (!block) return null;
 
-    const before = document.createRange();
-    before.selectNodeContents(block);
-    before.setEnd(caret.endContainer, caret.endOffset);
+  const before = document.createRange();
+  before.selectNodeContents(block);
+  before.setEnd(caret.endContainer, caret.endOffset);
 
-    const pieces = [];
+  const pieces = [];
 
-    function read(node) {
-      if (node.nodeType === Node.TEXT_NODE) {
-        pieces.push(node.data);
-      } else if (node.nodeType === Node.ELEMENT_NODE) {
-        if (node.tagName === 'BR' || node.getAttribute('contenteditable') === 'false') {
-          pieces.push('\n');
-        } else {
-          for (const child of node.childNodes) read(child);
-        }
+  function read(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      pieces.push(node.data);
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      if (node.tagName === 'BR' || node.getAttribute('contenteditable') === 'false') {
+        pieces.push('\n');
       } else {
         for (const child of node.childNodes) read(child);
       }
+  } else {
+    for (const child of node.childNodes) read(child);
+  }
+}
+
+read(before.cloneContents());
+
+const text = pieces.join('');
+const line = text.slice(text.lastIndexOf('\n') + 1);
+
+return {
+  editor,
+  caret: caret.cloneRange(),
+  line,
+  signature: text
+};
+}
+
+function replacementRange(context, match) {
+  const range = context.caret.cloneRange();
+  const root = context.editor;
+
+  let remaining = match.raw.length;
+  let node = range.endContainer;
+  let offset = range.endOffset;
+
+  function previous(item) {
+    let candidate = item;
+
+    while (candidate !== root && !candidate.previousSibling) {
+      candidate = candidate.parentNode;
     }
 
-    read(before.cloneContents());
+    if (!candidate || candidate === root) return null;
 
-    const text = pieces.join('');
-    const line = text.slice(text.lastIndexOf('\n') + 1);
+    candidate = candidate.previousSibling;
 
-    return {
-      editor,
-      caret: caret.cloneRange(),
-      line,
-      signature: text
-    };
+    while (candidate.lastChild && candidate.nodeType !== Node.TEXT_NODE) {
+      candidate = candidate.lastChild;
+    }
+
+    return candidate;
   }
 
-  function replacementRange(context, match) {
-    const range = context.caret.cloneRange();
-    const root = context.editor;
+  if (node.nodeType !== Node.TEXT_NODE) {
+    if (offset > 0) {
+      node = node.childNodes[offset - 1];
 
-    let remaining = match.raw.length;
-    let node = range.endContainer;
-    let offset = range.endOffset;
-
-    function previous(item) {
-      let candidate = item;
-
-      while (candidate !== root && !candidate.previousSibling) {
-        candidate = candidate.parentNode;
+      while (node.lastChild && node.nodeType !== Node.TEXT_NODE) {
+        node = node.lastChild;
       }
-
-      if (!candidate || candidate === root) return null;
-
-      candidate = candidate.previousSibling;
-
-      while (candidate.lastChild && candidate.nodeType !== Node.TEXT_NODE) {
-        candidate = candidate.lastChild;
-      }
-
-      return candidate;
-    }
-
-    if (node.nodeType !== Node.TEXT_NODE) {
-      if (offset > 0) {
-        node = node.childNodes[offset - 1];
-
-        while (node.lastChild && node.nodeType !== Node.TEXT_NODE) {
-          node = node.lastChild;
-        }
-      } else {
-        node = previous(node);
-      }
-
-      offset = node?.nodeType === Node.TEXT_NODE ? node.data.length : 0;
-    }
-
-    while (node) {
-      if (node.nodeType === Node.TEXT_NODE) {
-        if (remaining <= offset) {
-          range.setStart(node, offset - remaining);
-          return range.toString() === match.raw ? range : null;
-        }
-
-        remaining -= offset;
-      }
-
+    } else {
       node = previous(node);
-      offset = node?.nodeType === Node.TEXT_NODE ? node.data.length : 0;
     }
 
-    return null;
+    offset = node?.nodeType === Node.TEXT_NODE ? node.data.length : 0;
   }
 
-  function hideSuggestions() {
-    suggestion.hidden = true;
-    suggestion.replaceChildren();
-    current = null;
+  while (node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      if (remaining <= offset) {
+        range.setStart(node, offset - remaining);
+        return range.toString() === match.raw ? range : null;
+      }
+
+      remaining -= offset;
+    }
+
+    node = previous(node);
+    offset = node?.nodeType === Node.TEXT_NODE ? node.data.length : 0;
+  }
+
+  return null;
+}
+
+function hideSuggestions() {
+  suggestion.hidden = true;
+  suggestion.replaceChildren();
+  current = null;
+  expanded = false;
+  selected = 0;
+}
+
+function updateSuggestions() {
+  queued = false;
+
+  if (!enabled || composing || inserting || !veil.hidden || loadError) {
+    return hideSuggestions();
+  }
+
+  const context = caretContext();
+  if (!context) return hideSuggestions();
+
+  if (dismissed === context.signature && dismissedEditor === context.editor) {
+    return hideSuggestions();
+  }
+
+  dismissed = '';
+
+  const matches = findMatches(context.line, index);
+  if (!matches.length) return hideSuggestions();
+
+  const same = current?.context.editor === context.editor &&
+  current.context.signature === context.signature;
+
+  current = { context, matches };
+
+  if (!same) {
     expanded = false;
     selected = 0;
   }
 
-  function updateSuggestions() {
-    queued = false;
+  renderSuggestions();
+}
 
-    if (!enabled || composing || inserting || !veil.hidden || loadError) {
-      return hideSuggestions();
-    }
+let dismissedEditor = null;
 
-    const context = caretContext();
-    if (!context) return hideSuggestions();
+function scheduleSuggestions() {
+  if (queued) return;
+  queued = true;
+  requestAnimationFrame(updateSuggestions);
+}
 
-    if (dismissed === context.signature && dismissedEditor === context.editor) {
-      return hideSuggestions();
-    }
+function positionSuggestions() {
+  if (!current || suggestion.hidden) return;
 
-    dismissed = '';
-
-    const matches = findMatches(context.line, index);
-    if (!matches.length) return hideSuggestions();
-
-    const same = current?.context.editor === context.editor &&
-      current.context.signature === context.signature;
-
-    current = { context, matches };
-
-    if (!same) {
-      expanded = false;
-      selected = 0;
-    }
-
-    renderSuggestions();
+  if (!current.context.editor.isConnected || !caretContext()) {
+    return hideSuggestions();
   }
 
-  let dismissedEditor = null;
+  let rect = current.context.caret.getClientRects()[0] ||
+  current.context.caret.getBoundingClientRect();
 
-  function scheduleSuggestions() {
-    if (queued) return;
-    queued = true;
-    requestAnimationFrame(updateSuggestions);
+  if (!rect || rect.height === 0) {
+    rect = current.context.editor.getBoundingClientRect();
   }
 
-  function positionSuggestions() {
-    if (!current || suggestion.hidden) return;
+  const width = suggestion.offsetWidth;
+  const height = suggestion.offsetHeight;
 
-    if (!current.context.editor.isConnected || !caretContext()) {
-      return hideSuggestions();
-    }
+  let top = rect.bottom + 3;
 
-    let rect = current.context.caret.getClientRects()[0] ||
-      current.context.caret.getBoundingClientRect();
-
-    if (!rect || rect.height === 0) {
-      rect = current.context.editor.getBoundingClientRect();
-    }
-
-    const width = suggestion.offsetWidth;
-    const height = suggestion.offsetHeight;
-
-    let top = rect.bottom + 3;
-
-    if (top + height > innerHeight - 8) {
-      top = rect.top - height - 3;
-    }
-
-    suggestion.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - width - 8))}px`;
-    suggestion.style.top = `${Math.max(8, top)}px`;
+  if (top + height > innerHeight - 8) {
+    top = rect.top - height - 3;
   }
 
-  function renderSuggestions() {
-    if (!current) return;
+  suggestion.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - width - 8))}px`;
+  suggestion.style.top = `${Math.max(8, top)}px`;
+}
 
-    selected = Math.min(selected, current.matches.length - 1);
-    suggestion.replaceChildren();
-    suggestion.classList.toggle('expanded', expanded);
+function renderSuggestions() {
+  if (!current) return;
 
-    const visible = expanded ? current.matches : current.matches.slice(0, 1);
+  selected = Math.min(selected, current.matches.length - 1);
+  suggestion.replaceChildren();
+  suggestion.classList.toggle('expanded', expanded);
 
-    visible.forEach((match, itemIndex) => {
-      const row = button(
-        shortTitle(match.paste.title),
-        () => insertPaste(match),
-        itemIndex === selected ? 'active' : ''
+  const visible = expanded ? current.matches : current.matches.slice(0, 1);
+
+  visible.forEach((match, itemIndex) => {
+    const row = button(
+      shortTitle(match.paste.title),
+      () => insertPaste(match),
+      itemIndex === selected ? 'active' : ''
       );
 
-      row.tabIndex = -1;
-      row.setAttribute('role', 'option');
-      row.setAttribute('aria-label', match.paste.title);
-      row.setAttribute('aria-selected', String(itemIndex === selected));
+    row.tabIndex = -1;
+    row.setAttribute('role', 'option');
+    row.setAttribute('aria-label', match.paste.title);
+    row.setAttribute('aria-selected', String(itemIndex === selected));
 
-      suggestion.append(row);
-    });
-
-    suggestion.hidden = false;
-    positionSuggestions();
-
-    if (expanded) {
-      suggestion.children[selected]?.scrollIntoView({ block: 'nearest' });
-    }
-  }
-
-  function insertPaste(match) {
-    if (!current || inserting || composing) return;
-
-    const live = caretContext();
-
-    if (
-      !live ||
-      live.editor !== current.context.editor ||
-      live.signature !== current.context.signature
-    ) {
-      hideSuggestions();
-      return toast('The cursor moved. Type the keyword again.');
-    }
-
-    const range = replacementRange(live, match);
-
-    if (!range) {
-      return toast('The keyword range could not be selected.');
-    }
-
-    const editor = live.editor;
-    const selection = document.getSelection();
-
-    inserting = true;
-    hideSuggestions();
-
-    editor.focus({ preventScroll: true });
-    selection.removeAllRanges();
-    selection.addRange(range);
-
-    const original = editor.innerHTML;
-    let inputSeen = false;
-
-    const observeInput = () => {
-      inputSeen = true;
-    };
-
-    editor.addEventListener('input', observeInput);
-
-    try {
-      // Use the browser editing pipeline so ProseMirror observes a normal text edit.
-      // Never overwrite editor.innerHTML or mutate its document nodes directly.
-      document.execCommand('insertText', false, match.paste.text);
-
-      if (editor.innerHTML === original && match.paste.text !== match.raw) {
-        selection.removeAllRanges();
-        selection.addRange(live.caret);
-        toast('The editor rejected insertion. Copy the paste from Paste Helper instead.');
-      } else if (!inputSeen) {
-        editor.dispatchEvent(new InputEvent('input', {
-          bubbles: true,
-          inputType: 'insertText',
-          data: match.paste.text
-        }));
-      }
-    } catch (error) {
-      toast(`Insertion failed: ${error.message}`);
-    } finally {
-      editor.removeEventListener('input', observeInput);
-
-      // Allow the editor DOM observer to apply its own document transaction first.
-      setTimeout(() => {
-        inserting = false;
-        const context = caretContext();
-        dismissed = context?.signature || '';
-        dismissedEditor = editor;
-      }, 80);
-    }
-  }
-
-  function setEnabled(value) {
-    try {
-      GM_setValue(ENABLED_KEY, value);
-    } catch (error) {
-      return toast(`Could not save the setting: ${error.message}`);
-    }
-
-    enabled = value;
-
-    if (!enabled) {
-      hideSuggestions();
-    } else {
-      dismissed = '';
-      scheduleSuggestions();
-    }
-
-    updateToggleLabels();
-    toast(`Suggestions ${enabled ? 'enabled' : 'disabled'}`);
-  }
-
-  const veil = element('div', undefined, 'veil');
-  veil.hidden = true;
-
-  const modal = element('section', undefined, 'modal');
-  modal.setAttribute('role', 'dialog');
-  modal.setAttribute('aria-modal', 'true');
-  modal.setAttribute('aria-label', 'Paste Helper');
-
-  const header = element('div', undefined, 'header');
-  header.append(element('h1', 'Paste Helper'), button('Close', closeManager));
-
-  const toolbar = element('div', undefined, 'bar');
-
-  const search = element('input');
-  search.type = 'search';
-  search.placeholder = 'Search titles, keywords or text';
-  search.setAttribute('aria-label', 'Search pastes');
-
-  const toggleButton = button('', () => setEnabled(!enabled));
-
-  toolbar.append(
-    search,
-    button('Add paste', () => editPaste()),
-    button('Import JSON', importJSON),
-    button('Export JSON', exportJSON),
-    toggleButton
-  );
-
-  const body = element('div', undefined, 'body');
-  const list = element('div', undefined, 'list');
-  const detail = element('div', undefined, 'detail');
-  const status = element('div', undefined, 'status');
-
-  status.setAttribute('role', 'status');
-
-  body.append(list, detail);
-  modal.append(header, toolbar, body, status);
-  veil.append(modal);
-  shadow.append(veil);
-
-  veil.addEventListener('click', event => {
-    if (event.target === veil) closeManager();
+    suggestion.append(row);
   });
 
-  search.addEventListener('input', renderList);
+  suggestion.hidden = false;
+  positionSuggestions();
 
-    const managerKeys = new Set();
+  if (expanded) {
+    suggestion.children[selected]?.scrollIntoView({ block: 'nearest' });
+  }
+}
 
-  function interceptManagerKeys(event) {
-    const key = event.code || event.key;
-    const alreadyIntercepted = managerKeys.has(key);
+function insertPaste(match) {
+  if (!current || inserting || composing) return;
 
-    if (veil.hidden && !alreadyIntercepted) return;
+  const live = caretContext();
 
-    if (event.type === 'keydown') managerKeys.add(key);
-    if (event.type === 'keyup') managerKeys.delete(key);
+  if (
+    !live ||
+    live.editor !== current.context.editor ||
+    live.signature !== current.context.signature
+    ) {
+    hideSuggestions();
+  return toast('The cursor moved. Type the keyword again.');
+}
+
+const range = replacementRange(live, match);
+
+if (!range) {
+  return toast('The keyword range could not be selected.');
+}
+
+const editor = live.editor;
+const selection = document.getSelection();
+const pasteText = match.paste.text.replace(/\r\n?/g, '\n');
+
+inserting = true;
+hideSuggestions();
+
+editor.focus({ preventScroll: true });
+selection.removeAllRanges();
+selection.addRange(range);
+
+try {
+  let inserted = false;
+
+  if (pasteText.includes('\n')) {
+      // Escape HTML to prevent user text from being interpreted as markup.
+    const escapeHTML = value => value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+      // Preserve line breaks without creating additional paragraphs.
+    const html = pasteText
+    .split('\n')
+    .map(escapeHTML)
+    .join('<br>');
+
+    inserted = document.execCommand('insertHTML', false, html);
+  } else {
+      // Keep native text insertion for single-line snippets.
+    inserted = document.execCommand('insertText', false, pasteText);
+  }
+
+  if (!inserted) {
+    toast('The editor did not confirm insertion. Check the comment before retrying.');
+  }
+} catch (error) {
+  toast(`Insertion failed: ${error.message}`);
+} finally {
+    // Allow YouTrack to process the editor changes.
+  setTimeout(() => {
+    inserting = false;
+
+    const context = caretContext();
+    dismissed = context?.signature || '';
+    dismissedEditor = editor;
+  }, 80);
+}
+}
+
+function setEnabled(value) {
+  try {
+    GM_setValue(ENABLED_KEY, value);
+  } catch (error) {
+    return toast(`Could not save the setting: ${error.message}`);
+  }
+
+  enabled = value;
+
+  if (!enabled) {
+    hideSuggestions();
+  } else {
+    dismissed = '';
+    scheduleSuggestions();
+  }
+
+  updateToggleLabels();
+  toast(`Suggestions ${enabled ? 'enabled' : 'disabled'}`);
+}
+
+const veil = element('div', undefined, 'veil');
+veil.hidden = true;
+
+const modal = element('section', undefined, 'modal');
+modal.setAttribute('role', 'dialog');
+modal.setAttribute('aria-modal', 'true');
+modal.setAttribute('aria-label', 'Paste Helper');
+
+const header = element('div', undefined, 'header');
+header.append(element('h1', 'Paste Helper'), button('Close', closeManager));
+
+const toolbar = element('div', undefined, 'bar');
+
+const search = element('input');
+search.type = 'search';
+search.placeholder = 'Search titles, keywords or text';
+search.setAttribute('aria-label', 'Search pastes');
+
+const toggleButton = button('', () => setEnabled(!enabled));
+
+toolbar.append(
+  search,
+  button('Add paste', () => editPaste()),
+  button('Import JSON', importJSON),
+  button('Export JSON', exportJSON),
+  toggleButton
+  );
+
+const body = element('div', undefined, 'body');
+const list = element('div', undefined, 'list');
+const detail = element('div', undefined, 'detail');
+const status = element('div', undefined, 'status');
+
+status.setAttribute('role', 'status');
+
+body.append(list, detail);
+modal.append(header, toolbar, body, status);
+veil.append(modal);
+shadow.append(veil);
+
+veil.addEventListener('click', event => {
+  if (event.target === veil) closeManager();
+});
+
+search.addEventListener('input', renderList);
+
+const managerKeys = new Set();
+
+function interceptManagerKeys(event) {
+  const key = event.code || event.key;
+  const alreadyIntercepted = managerKeys.has(key);
+
+  if (veil.hidden && !alreadyIntercepted) return;
+
+  if (event.type === 'keydown') managerKeys.add(key);
+  if (event.type === 'keyup') managerKeys.delete(key);
 
     // Stop page shortcuts before the event reaches document or React handlers.
     // Native typing, clipboard shortcuts and editing remain enabled.
-    event.stopImmediatePropagation();
+  event.stopImmediatePropagation();
 
-    if (event.type !== 'keydown' || veil.hidden || event.isComposing) return;
+  if (event.type !== 'keydown' || veil.hidden || event.isComposing) return;
 
-    if (
-      event.code === HOTKEY.code &&
-      event.ctrlKey === HOTKEY.ctrl &&
-      event.shiftKey === HOTKEY.shift &&
-      event.altKey === HOTKEY.alt &&
-      event.metaKey === HOTKEY.meta
+  if (
+    event.code === HOTKEY.code &&
+    event.ctrlKey === HOTKEY.ctrl &&
+    event.shiftKey === HOTKEY.shift &&
+    event.altKey === HOTKEY.alt &&
+    event.metaKey === HOTKEY.meta
     ) {
-      event.preventDefault();
+    event.preventDefault();
 
-      if (!event.repeat) setEnabled(!enabled);
+  if (!event.repeat) setEnabled(!enabled);
 
-      return;
-    }
+  return;
+}
 
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      closeManager();
-      return;
-    }
+if (event.key === 'Escape') {
+  event.preventDefault();
+  closeManager();
+  return;
+}
 
-    if (event.key === 'Tab') {
-      const nodes = [...modal.querySelectorAll('button,input,textarea')]
-        .filter(node => !node.disabled && node.getClientRects().length);
+if (event.key === 'Tab') {
+  const nodes = [...modal.querySelectorAll('button,input,textarea')]
+  .filter(node => !node.disabled && node.getClientRects().length);
 
-      const first = nodes[0];
-      const last = nodes[nodes.length - 1];
+  const first = nodes[0];
+  const last = nodes[nodes.length - 1];
 
-      if (event.shiftKey && shadow.activeElement === first) {
-        event.preventDefault();
-        last?.focus();
-      } else if (!event.shiftKey && shadow.activeElement === last) {
-        event.preventDefault();
-        first?.focus();
-      }
-    }
+  if (event.shiftKey && shadow.activeElement === first) {
+    event.preventDefault();
+    last?.focus();
+  } else if (!event.shiftKey && shadow.activeElement === last) {
+    event.preventDefault();
+    first?.focus();
+  }
+}
+}
+
+for (const eventName of ['keydown', 'keypress', 'keyup']) {
+  window.addEventListener(eventName, interceptManagerKeys, true);
+}
+
+window.addEventListener('blur', () => managerKeys.clear());
+
+function managerStatus(text, error = false) {
+  status.textContent = text;
+  status.classList.toggle('error', error);
+}
+
+function openManager() {
+  if (!veil.hidden) return search.focus();
+
+  const selection = document.getSelection();
+
+  managerReturn = {
+    element: document.activeElement,
+    range: selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null
+  };
+
+  hideSuggestions();
+  veil.hidden = false;
+  search.value = '';
+
+  renderList();
+  showPaste(pastes.find(paste => paste.id === selectedPasteId));
+
+  managerStatus(
+    loadError || `${pastes.length} pastes · Ctrl+Shift+Space toggles suggestions`,
+    Boolean(loadError)
+    );
+
+  search.focus();
+}
+
+function closeManager() {
+  veil.hidden = true;
+
+  const previous = managerReturn;
+  managerReturn = null;
+
+  if (previous?.element?.isConnected) {
+    previous.element.focus({ preventScroll: true });
   }
 
-  for (const eventName of ['keydown', 'keypress', 'keyup']) {
-    window.addEventListener(eventName, interceptManagerKeys, true);
-  }
-
-  window.addEventListener('blur', () => managerKeys.clear());
-
-  function managerStatus(text, error = false) {
-    status.textContent = text;
-    status.classList.toggle('error', error);
-  }
-
-  function openManager() {
-    if (!veil.hidden) return search.focus();
-
+  if (
+    previous?.range?.startContainer.isConnected &&
+    previous.range.endContainer.isConnected
+    ) {
     const selection = document.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(previous.range);
 
-    managerReturn = {
-      element: document.activeElement,
-      range: selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null
-    };
+  const context = caretContext();
+  dismissed = context?.signature || '';
+  dismissedEditor = context?.editor || null;
+}
+}
 
-    hideSuggestions();
-    veil.hidden = false;
-    search.value = '';
+function renderList() {
+  const query = normalize(search.value.trim());
 
-    renderList();
-    showPaste(pastes.find(paste => paste.id === selectedPasteId));
-
-    managerStatus(
-      loadError || `${pastes.length} pastes · Ctrl+Shift+Space toggles suggestions`,
-      Boolean(loadError)
+  const visible = pastes.filter(paste =>
+    normalize([paste.title, paste.text, ...paste.keywords].join('\n')).includes(query)
     );
 
-    search.focus();
-  }
+  list.replaceChildren();
 
-  function closeManager() {
-    veil.hidden = true;
-
-    const previous = managerReturn;
-    managerReturn = null;
-
-    if (previous?.element?.isConnected) {
-      previous.element.focus({ preventScroll: true });
-    }
-
-    if (
-      previous?.range?.startContainer.isConnected &&
-      previous.range.endContainer.isConnected
-    ) {
-      const selection = document.getSelection();
-      selection.removeAllRanges();
-      selection.addRange(previous.range);
-
-      const context = caretContext();
-      dismissed = context?.signature || '';
-      dismissedEditor = context?.editor || null;
-    }
-  }
-
-  function renderList() {
-    const query = normalize(search.value.trim());
-
-    const visible = pastes.filter(paste =>
-      normalize([paste.title, paste.text, ...paste.keywords].join('\n')).includes(query)
-    );
-
-    list.replaceChildren();
-
-    for (const paste of visible) {
-      const row = button(
-        paste.title,
-        () => {
-          selectedPasteId = paste.id;
-          renderList();
-          showPaste(paste);
-        },
-        paste.id === selectedPasteId ? 'selected' : ''
+  for (const paste of visible) {
+    const row = button(
+      paste.title,
+      () => {
+        selectedPasteId = paste.id;
+        renderList();
+        showPaste(paste);
+      },
+      paste.id === selectedPasteId ? 'selected' : ''
       );
 
-      list.append(row);
-    }
+    list.append(row);
+  }
 
-    if (!visible.length) {
-      list.append(element(
-        'p',
-        pastes.length ? 'No matches.' : 'No pastes yet. Click Add paste.',
-        'muted'
+  if (!visible.length) {
+    list.append(element(
+      'p',
+      pastes.length ? 'No matches.' : 'No pastes yet. Click Add paste.',
+      'muted'
       ));
-    }
+  }
+}
+
+function showPaste(paste) {
+  detail.replaceChildren();
+
+  if (!paste) {
+    detail.append(element('p', 'Select a paste or add your first one.', 'muted'));
+    return;
   }
 
-  function showPaste(paste) {
-    detail.replaceChildren();
+  const actions = element('div', undefined, 'actions');
 
-    if (!paste) {
-      detail.append(element('p', 'Select a paste or add your first one.', 'muted'));
-      return;
-    }
+  actions.append(
+    button('Edit', () => editPaste(paste)),
+    button('Copy', () => copyPaste(paste)),
+    button('Delete', () => {
+      if (!confirm(`Delete “${paste.title}”?`)) return;
 
-    const actions = element('div', undefined, 'actions');
+      if (!saveDatabase(pastes.filter(item => item.id !== paste.id))) return;
 
-    actions.append(
-      button('Edit', () => editPaste(paste)),
-      button('Copy', () => copyPaste(paste)),
-      button('Delete', () => {
-        if (!confirm(`Delete “${paste.title}”?`)) return;
-
-        if (!saveDatabase(pastes.filter(item => item.id !== paste.id))) return;
-
-        selectedPasteId = null;
-        renderList();
-        showPaste(null);
-        managerStatus('Paste deleted.');
-      }, 'danger')
+      selectedPasteId = null;
+      renderList();
+      showPaste(null);
+      managerStatus('Paste deleted.');
+    }, 'danger')
     );
 
-    detail.append(
-      element('h2', paste.title),
-      element('div', paste.text, 'text'),
-      element('p', `Keywords: ${paste.keywords.join(' · ')}`, 'muted'),
-      actions
+  detail.append(
+    element('h2', paste.title),
+    element('div', paste.text, 'text'),
+    element('p', `Keywords: ${paste.keywords.join(' · ')}`, 'muted'),
+    actions
     );
+}
+
+function editPaste(paste) {
+  detail.replaceChildren();
+  const form = element('form');
+
+  function field(label, tag, value, rows) {
+    const input = element(tag);
+    const id = `pgph-${newId()}`;
+
+    input.id = id;
+    input.value = value;
+    input.required = true;
+
+    if (rows) input.rows = rows;
+
+    const caption = element('label', label);
+    caption.htmlFor = id;
+    form.append(caption, input);
+
+    return input;
   }
 
-  function editPaste(paste) {
-    detail.replaceChildren();
-    const form = element('form');
+  form.append(element('h2', paste ? 'Edit paste' : 'Add paste'));
 
-    function field(label, tag, value, rows) {
-      const input = element(tag);
-      const id = `pgph-${newId()}`;
+  const title = field('Title', 'input', paste?.title || '');
+  title.maxLength = 500;
 
-      input.id = id;
-      input.value = value;
-      input.required = true;
-
-      if (rows) input.rows = rows;
-
-      const caption = element('label', label);
-      caption.htmlFor = id;
-      form.append(caption, input);
-
-      return input;
-    }
-
-    form.append(element('h2', paste ? 'Edit paste' : 'Add paste'));
-
-    const title = field('Title', 'input', paste?.title || '');
-    title.maxLength = 500;
-
-    const text = field(
-      'Text (plain text, line breaks supported)',
-      'textarea',
-      paste?.text || '',
-      10
+  const text = field(
+    'Text (plain text, line breaks supported)',
+    'textarea',
+    paste?.text || '',
+    10
     );
-    text.maxLength = 100000;
+  text.maxLength = 100000;
 
-    const keywords = field(
-      'Keywords / phrases — one per line',
-      'textarea',
-      paste?.keywords.join('\n') || '',
-      4
+  const keywords = field(
+    'Keywords / phrases — one per line',
+    'textarea',
+    paste?.keywords.join('\n') || '',
+    4
     );
 
-    const actions = element('div', undefined, 'actions');
-    const submit = element('button', 'Save', 'primary');
-    submit.type = 'submit';
+  const actions = element('div', undefined, 'actions');
+  const submit = element('button', 'Save', 'primary');
+  submit.type = 'submit';
 
-    actions.append(
-      submit,
-      button('Cancel', () =>
-        showPaste(pastes.find(item => item.id === selectedPasteId))
+  actions.append(
+    submit,
+    button('Cancel', () =>
+      showPaste(pastes.find(item => item.id === selectedPasteId))
       )
     );
 
-    form.append(actions);
+  form.append(actions);
 
-    form.addEventListener('submit', event => {
-      event.preventDefault();
+  form.addEventListener('submit', event => {
+    event.preventDefault();
 
-      const item = {
-        id: paste?.id || newId(),
-        title: title.value,
-        text: text.value,
-        keywords: keywords.value
-          .split(/\r?\n/)
-          .map(key => key.trim())
-          .filter(Boolean)
-      };
+    const item = {
+      id: paste?.id || newId(),
+      title: title.value,
+      text: text.value,
+      keywords: keywords.value
+      .split(/\r?\n/)
+      .map(key => key.trim())
+      .filter(Boolean)
+    };
 
-      let clean;
-
-      try {
-        clean = validatePastes([item])[0];
-      } catch (error) {
-        return managerStatus(error.message, true);
-      }
-
-      const next = paste
-        ? pastes.map(existing => existing.id === paste.id ? clean : existing)
-        : [...pastes, clean];
-
-      if (!saveDatabase(next)) return;
-
-      selectedPasteId = clean.id;
-      renderList();
-      showPaste(clean);
-      managerStatus('Paste saved.');
-    });
-
-    detail.append(form);
-    title.focus();
-  }
-
-  function saveDatabase(next) {
-    if (loadError) {
-      managerStatus(
-        'The stored database is invalid. Repair it before saving; existing data will not be overwritten.',
-        true
-      );
-      return false;
-    }
+    let clean;
 
     try {
-      const validated = validatePastes(next);
-      GM_setValue(DB_KEY, { version: 1, pastes: validated });
-
-      pastes = validated;
-      index = buildIndex(pastes);
-      dismissed = '';
-      hideSuggestions();
-
-      return true;
+      clean = validatePastes([item])[0];
     } catch (error) {
-      managerStatus(`Could not save: ${error.message}`, true);
-      return false;
+      return managerStatus(error.message, true);
     }
-  }
 
-  async function copyPaste(paste) {
-    try {
-      await navigator.clipboard.writeText(paste.text);
-      managerStatus('Copied.');
-    } catch {
-      const field = element('textarea');
-      field.value = paste.text;
-      field.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;';
+    const next = paste
+    ? pastes.map(existing => existing.id === paste.id ? clean : existing)
+    : [...pastes, clean];
 
-      shadow.append(field);
-      field.focus();
-      field.select();
+    if (!saveDatabase(next)) return;
 
-      let copied = false;
+    selectedPasteId = clean.id;
+    renderList();
+    showPaste(clean);
+    managerStatus('Paste saved.');
+  });
 
-      try {
-        copied = document.execCommand('copy');
-      } catch {
-        // Keep the manual copy instruction.
-      }
+  detail.append(form);
+  title.focus();
+}
 
-      field.remove();
-
-      managerStatus(
-        copied ? 'Copied.' : 'Copy was blocked. Select the paste text and press Ctrl+C.',
-        !copied
+function saveDatabase(next) {
+  if (loadError) {
+    managerStatus(
+      'The stored database is invalid. Repair it before saving; existing data will not be overwritten.',
+      true
       );
-    }
+    return false;
   }
 
-  function downloadJSON(contents, filename) {
-    const url = URL.createObjectURL(new Blob(
-      [JSON.stringify(contents, null, 2)],
-      { type: 'application/json;charset=utf-8' }
+  try {
+    const validated = validatePastes(next);
+    GM_setValue(DB_KEY, { version: 1, pastes: validated });
+
+    pastes = validated;
+    index = buildIndex(pastes);
+    dismissed = '';
+    hideSuggestions();
+
+    return true;
+  } catch (error) {
+    managerStatus(`Could not save: ${error.message}`, true);
+    return false;
+  }
+}
+
+async function copyPaste(paste) {
+  try {
+    await navigator.clipboard.writeText(paste.text);
+    managerStatus('Copied.');
+  } catch {
+    const field = element('textarea');
+    field.value = paste.text;
+    field.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;';
+
+    shadow.append(field);
+    field.focus();
+    field.select();
+
+    let copied = false;
+
+    try {
+      copied = document.execCommand('copy');
+    } catch {
+        // Keep the manual copy instruction.
+    }
+
+    field.remove();
+
+    managerStatus(
+      copied ? 'Copied.' : 'Copy was blocked. Select the paste text and press Ctrl+C.',
+      !copied
+      );
+  }
+}
+
+function downloadJSON(contents, filename) {
+  const url = URL.createObjectURL(new Blob(
+    [JSON.stringify(contents, null, 2)],
+    { type: 'application/json;charset=utf-8' }
     ));
 
-    const anchor = element('a');
-    anchor.href = url;
-    anchor.download = filename;
+  const anchor = element('a');
+  anchor.href = url;
+  anchor.download = filename;
 
-    shadow.append(anchor);
-    anchor.click();
-    anchor.remove();
+  shadow.append(anchor);
+  anchor.click();
+  anchor.remove();
 
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+function exportJSON() {
+  if (loadError) {
+    downloadJSON(GM_getValue(DB_KEY), 'playgama-pastes-recovery.json');
+    return managerStatus('Exported the unreadable data for recovery.', true);
   }
 
-  function exportJSON() {
-    if (loadError) {
-      downloadJSON(GM_getValue(DB_KEY), 'playgama-pastes-recovery.json');
-      return managerStatus('Exported the unreadable data for recovery.', true);
+  downloadJSON({ version: 1, pastes }, 'playgama-pastes.json');
+  managerStatus('JSON exported.');
+}
+
+function importJSON() {
+  const input = element('input');
+  input.type = 'file';
+  input.accept = '.json,application/json';
+  input.hidden = true;
+
+  shadow.append(input);
+
+  input.addEventListener('cancel', () => input.remove(), { once: true });
+
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    input.remove();
+
+    if (!file) return;
+
+    if (file.size > 20 * 1024 * 1024) {
+      return managerStatus('The JSON file must be smaller than 20 MB.', true);
     }
 
-    downloadJSON({ version: 1, pastes }, 'playgama-pastes.json');
-    managerStatus('JSON exported.');
-  }
+    try {
+      const imported = validatePastes(await file.text());
 
-  function importJSON() {
-    const input = element('input');
-    input.type = 'file';
-    input.accept = '.json,application/json';
-    input.hidden = true;
+      const fingerprint = item => JSON.stringify([
+        item.title,
+        item.text,
+        [...item.keywords].map(normalize).sort()
+      ]);
 
-    shadow.append(input);
+      const seen = new Set(pastes.map(fingerprint));
+      const additions = [];
 
-    input.addEventListener('cancel', () => input.remove(), { once: true });
+      for (const item of imported) {
+        const key = fingerprint(item);
 
-    input.addEventListener('change', async () => {
-      const file = input.files?.[0];
-      input.remove();
+        if (seen.has(key)) continue;
 
-      if (!file) return;
-
-      if (file.size > 20 * 1024 * 1024) {
-        return managerStatus('The JSON file must be smaller than 20 MB.', true);
+        seen.add(key);
+        additions.push({ ...item, id: newId() });
       }
 
-      try {
-        const imported = validatePastes(await file.text());
+      if (!saveDatabase([...pastes, ...additions])) return;
 
-        const fingerprint = item => JSON.stringify([
-          item.title,
-          item.text,
-          [...item.keywords].map(normalize).sort()
-        ]);
+      renderList();
+      showPaste(pastes.find(item => item.id === selectedPasteId));
 
-        const seen = new Set(pastes.map(fingerprint));
-        const additions = [];
-
-        for (const item of imported) {
-          const key = fingerprint(item);
-
-          if (seen.has(key)) continue;
-
-          seen.add(key);
-          additions.push({ ...item, id: newId() });
-        }
-
-        if (!saveDatabase([...pastes, ...additions])) return;
-
-        renderList();
-        showPaste(pastes.find(item => item.id === selectedPasteId));
-
-        managerStatus(
-          `Imported ${additions.length} pastes. Skipped ${imported.length - additions.length} duplicates. Existing pastes were kept.`
-        );
-      } catch (error) {
-        managerStatus(`Import failed: ${error.message}`, true);
-      }
-    }, { once: true });
-
-    input.click();
-  }
-
-  function updateToggleLabels() {
-    const label = `Suggestions: ${enabled ? 'On' : 'Off'}`;
-    toggleButton.textContent = label;
-
-    for (const node of document.querySelectorAll('[data-pgph-toggle]')) {
-      if (node.textContent !== label) node.textContent = label;
+      managerStatus(
+    `Imported ${additions.length} pastes. Skipped ${imported.length - additions.length} duplicates. Existing pastes were kept.`
+    );
+    } catch (error) {
+      managerStatus(`Import failed: ${error.message}`, true);
     }
-  }
+  }, { once: true });
 
-  function injectProfileMenu() {
-    menuQueued = false;
+  input.click();
+}
+
+function updateToggleLabels() {
+  const label = `Suggestions: ${enabled ? 'On' : 'Off'}`;
+  toggleButton.textContent = label;
+
+  for (const node of document.querySelectorAll('[data-pgph-toggle]')) {
+    if (node.textContent !== label) node.textContent = label;
+  }
+}
+
+function injectProfileMenu() {
+  menuQueued = false;
 
     // Match the observed menu labels; do not depend on YouTrack's generated classes.
-    for (const popup of document.querySelectorAll('[data-test~="ring-popup"]')) {
-      if (popup.querySelector('[data-pgph-menu]')) continue;
+  for (const popup of document.querySelectorAll('[data-test~="ring-popup"]')) {
+    if (popup.querySelector('[data-pgph-menu]')) continue;
 
-      const items = [...popup.querySelectorAll('a,button,[role="menuitem"]')];
-      const label = node => node.textContent.replace(/\s+/gu, ' ').trim();
-      const profile = items.find(node => label(node) === 'Profile');
+    const items = [...popup.querySelectorAll('a,button,[role="menuitem"]')];
+    const label = node => node.textContent.replace(/\s+/gu, ' ').trim();
+    const profile = items.find(node => label(node) === 'Profile');
 
-      if (
-        !profile ||
-        !items.some(node => ['Log out', 'Switch user'].includes(label(node)))
+    if (
+      !profile ||
+      !items.some(node => ['Log out', 'Switch user'].includes(label(node)))
       ) {
-        continue;
-      }
+      continue;
+  }
 
-      let container = profile.closest('[role="menu"],ul');
+  let container = profile.closest('[role="menu"],ul');
 
-      if (!container || !popup.contains(container)) {
-        container = popup;
-      }
+  if (!container || !popup.contains(container)) {
+    container = popup;
+  }
 
-      const panel = element('div');
-      panel.dataset.pgphMenu = '1';
-      panel.style.cssText = 'border-top:1px solid #8885;margin-top:4px;padding:4px 0;';
+  const panel = element('div');
+  panel.dataset.pgphMenu = '1';
+  panel.style.cssText = 'border-top:1px solid #8885;margin-top:4px;padding:4px 0;';
 
-      const open = button('Paste Helper', openManager);
-      const toggle = button(
-        `Suggestions: ${enabled ? 'On' : 'Off'}`,
-        () => setEnabled(!enabled)
-      );
+  const open = button('Paste Helper', openManager);
+  const toggle = button(
+`Suggestions: ${enabled ? 'On' : 'Off'}`,
+() => setEnabled(!enabled)
+);
 
-      toggle.dataset.pgphToggle = '1';
+  toggle.dataset.pgphToggle = '1';
 
-            const menuStyle = element('style');
-      menuStyle.textContent = `
+  const menuStyle = element('style');
+  menuStyle.textContent = `
         [data-pgph-menu] button:hover,
         [data-pgph-menu] button:focus-visible {
           background: var(
@@ -1331,157 +1332,157 @@
             var(--ring-selected-background-color, rgba(255, 255, 255, 0.08))
           ) !important;
         }
-      `;
-      panel.append(menuStyle);
+  `;
+  panel.append(menuStyle);
 
-      for (const control of [open, toggle]) {
-        control.style.cssText = 'display:block;width:100%;padding:7px 14px;text-align:left;background:transparent;color:var(--ring-white-text-color, #fff);border:0;font:inherit;cursor:pointer;';
-        panel.append(control);
-      }
-
-      container.append(panel);
-    }
+  for (const control of [open, toggle]) {
+    control.style.cssText = 'display:block;width:100%;padding:7px 14px;text-align:left;background:transparent;color:var(--ring-white-text-color, #fff);border:0;font:inherit;cursor:pointer;';
+    panel.append(control);
   }
 
-  const menuObserver = new MutationObserver(records => {
-    if (menuQueued || !records.some(record => record.type === 'childList')) return;
+  container.append(panel);
+}
+}
 
-    menuQueued = true;
-    requestAnimationFrame(injectProfileMenu);
-  });
+const menuObserver = new MutationObserver(records => {
+  if (menuQueued || !records.some(record => record.type === 'childList')) return;
 
-  menuObserver.observe(document.body, { childList: true, subtree: true });
+  menuQueued = true;
+  requestAnimationFrame(injectProfileMenu);
+});
 
-  injectProfileMenu();
-  updateToggleLabels();
+menuObserver.observe(document.body, { childList: true, subtree: true });
 
-  document.addEventListener('input', event => {
-    if (editorFor(event.target) && !inserting) {
-      dismissed = '';
-      scheduleSuggestions();
-    }
-  }, true);
+injectProfileMenu();
+updateToggleLabels();
 
-  document.addEventListener('compositionstart', event => {
-    if (editorFor(event.target)) {
-      composing = true;
-      hideSuggestions();
-    }
-  }, true);
+document.addEventListener('input', event => {
+  if (editorFor(event.target) && !inserting) {
+    dismissed = '';
+    scheduleSuggestions();
+  }
+}, true);
 
-  document.addEventListener('compositionend', event => {
-    if (editorFor(event.target)) {
-      composing = false;
-      scheduleSuggestions();
-    }
-  }, true);
+document.addEventListener('compositionstart', event => {
+  if (editorFor(event.target)) {
+    composing = true;
+    hideSuggestions();
+  }
+}, true);
 
-  document.addEventListener('selectionchange', scheduleSuggestions);
-  document.addEventListener('focusin', scheduleSuggestions);
+document.addEventListener('compositionend', event => {
+  if (editorFor(event.target)) {
+    composing = false;
+    scheduleSuggestions();
+  }
+}, true);
 
-  document.addEventListener('mousedown', event => {
-    if (!event.composedPath().includes(host) && !editorFor(event.target)) {
-      hideSuggestions();
-    }
-  }, true);
+document.addEventListener('selectionchange', scheduleSuggestions);
+document.addEventListener('focusin', scheduleSuggestions);
 
-  window.addEventListener('blur', hideSuggestions);
-  window.addEventListener('resize', positionSuggestions);
-  window.addEventListener('scroll', positionSuggestions, true);
+document.addEventListener('mousedown', event => {
+  if (!event.composedPath().includes(host) && !editorFor(event.target)) {
+    hideSuggestions();
+  }
+}, true);
 
-  document.addEventListener('keydown', event => {
-    if (event.isComposing || composing) return;
+window.addEventListener('blur', hideSuggestions);
+window.addEventListener('resize', positionSuggestions);
+window.addEventListener('scroll', positionSuggestions, true);
 
-    if (
-      event.code === HOTKEY.code &&
-      event.ctrlKey === HOTKEY.ctrl &&
-      event.shiftKey === HOTKEY.shift &&
-      event.altKey === HOTKEY.alt &&
-      event.metaKey === HOTKEY.meta
+document.addEventListener('keydown', event => {
+  if (event.isComposing || composing) return;
+
+  if (
+    event.code === HOTKEY.code &&
+    event.ctrlKey === HOTKEY.ctrl &&
+    event.shiftKey === HOTKEY.shift &&
+    event.altKey === HOTKEY.alt &&
+    event.metaKey === HOTKEY.meta
     ) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
+    event.preventDefault();
+  event.stopImmediatePropagation();
 
-      if (!event.repeat) setEnabled(!enabled);
+  if (!event.repeat) setEnabled(!enabled);
 
-      return;
-    }
+  return;
+}
 
-    if (!current || suggestion.hidden || !editorFor(event.target)) return;
+if (!current || suggestion.hidden || !editorFor(event.target)) return;
 
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      event.stopImmediatePropagation();
+if (event.key === 'Escape') {
+  event.preventDefault();
+  event.stopImmediatePropagation();
 
-      dismissed = current.context.signature;
-      dismissedEditor = current.context.editor;
+  dismissed = current.context.signature;
+  dismissedEditor = current.context.editor;
 
-      hideSuggestions();
-    } else if (
-      expanded &&
-      (event.key === 'ArrowDown' || event.key === 'ArrowUp')
-    ) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
+  hideSuggestions();
+} else if (
+  expanded &&
+  (event.key === 'ArrowDown' || event.key === 'ArrowUp')
+  ) {
+  event.preventDefault();
+  event.stopImmediatePropagation();
 
-      selected = (
-        selected +
-        (event.key === 'ArrowDown' ? 1 : -1) +
-        current.matches.length
-      ) % current.matches.length;
+  selected = (
+    selected +
+    (event.key === 'ArrowDown' ? 1 : -1) +
+    current.matches.length
+    ) % current.matches.length;
 
-      renderSuggestions();
-    } else if (
-      event.key === 'Enter' &&
-      !event.ctrlKey &&
-      !event.altKey &&
-      !event.metaKey &&
-      !event.shiftKey
-    ) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
+  renderSuggestions();
+} else if (
+  event.key === 'Enter' &&
+  !event.ctrlKey &&
+  !event.altKey &&
+  !event.metaKey &&
+  !event.shiftKey
+  ) {
+  event.preventDefault();
+  event.stopImmediatePropagation();
 
-      insertPaste(current.matches[expanded ? selected : 0]);
-    }
-  }, true);
+  insertPaste(current.matches[expanded ? selected : 0]);
+}
+}, true);
 
-  GM_registerMenuCommand('Paste Helper', openManager);
+GM_registerMenuCommand('Paste Helper', openManager);
 
-  GM_registerMenuCommand(
-    'Suggestions: toggle (Ctrl+Shift+Space)',
-    () => setEnabled(!enabled)
+GM_registerMenuCommand(
+  'Suggestions: toggle (Ctrl+Shift+Space)',
+  () => setEnabled(!enabled)
   );
 
-  if (typeof GM_addValueChangeListener === 'function') {
-    GM_addValueChangeListener(DB_KEY, (_key, _old, _value, remote) => {
-      if (!remote) return;
+if (typeof GM_addValueChangeListener === 'function') {
+  GM_addValueChangeListener(DB_KEY, (_key, _old, _value, remote) => {
+    if (!remote) return;
 
-      loadDatabase();
-      hideSuggestions();
+    loadDatabase();
+    hideSuggestions();
 
-      if (!veil.hidden) {
-        renderList();
-        showPaste(pastes.find(item => item.id === selectedPasteId));
+    if (!veil.hidden) {
+      renderList();
+      showPaste(pastes.find(item => item.id === selectedPasteId));
 
-        managerStatus(
-          loadError || 'Database updated in another tab.',
-          Boolean(loadError)
+      managerStatus(
+        loadError || 'Database updated in another tab.',
+        Boolean(loadError)
         );
-      }
-    });
+    }
+  });
 
-    GM_addValueChangeListener(ENABLED_KEY, (_key, _old, value, remote) => {
-      if (!remote) return;
+  GM_addValueChangeListener(ENABLED_KEY, (_key, _old, value, remote) => {
+    if (!remote) return;
 
-      enabled = value !== false;
-      updateToggleLabels();
+    enabled = value !== false;
+    updateToggleLabels();
 
-      if (!enabled) hideSuggestions();
-      else scheduleSuggestions();
-    });
-  }
+    if (!enabled) hideSuggestions();
+    else scheduleSuggestions();
+  });
+}
 
-  if (loadError) {
-    toast('Paste Helper: saved data could not be read. Open the manager to export it for recovery.');
-  }
+if (loadError) {
+  toast('Paste Helper: saved data could not be read. Open the manager to export it for recovery.');
+}
 })();
